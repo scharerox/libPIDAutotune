@@ -1,6 +1,6 @@
 #include "pid_autotune.h"
 #include <chrono>
-#include <stdlib.h>
+#include <cstdlib>
 
 using namespace PIDAutotune;
 
