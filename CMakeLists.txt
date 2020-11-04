@@ -3,4 +3,4 @@ project(libPIDAutotune)
 
 set(CMAKE_CXX_STANDARD 14)
 
-add_library(libPIDAutotune SHARED pid_autotune.cpp pid_autotune.h)
+add_library(libPIDAutotune STATIC pid_autotune.cpp pid_autotune.h)
