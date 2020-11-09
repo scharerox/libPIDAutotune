@@ -5,7 +5,7 @@
 #ifndef LIBPIDAUTOTUNE_PID_AUTOTUNE_H
 #define LIBPIDAUTOTUNE_PID_AUTOTUNE_H
 
-#include <stdint.h>
+#include <cstdint>
 
 namespace PIDAutotune {
     class Autotune {
@@ -26,6 +26,7 @@ namespace PIDAutotune {
         struct TuningParameters {
             TuningParameters();
             double setpoint, step, start, noise, maxOutput;
+            double *input, *output;
             int loopbackSec;
             ControlType ctrlType;
         };
@@ -45,26 +46,22 @@ namespace PIDAutotune {
             double slopeLoopbackMilli; // Time in milliseconds looking back for calculating slope
             double settleTimeoutSec; // Time in seconds to be waiting to let the input settle
 
+            double maxBangBangDeviation;
+            double coolingNoise;
+
             uint8_t timeoutMin; // Timeout in minutes, when exceeded finding parameters returns error
         };
 
-        Autotune(double* input, double* output, double setpoint);
         Autotune(TuningParameters &tuningParameters);
 
         int Runtime();// * Similar to the PID Compue function, returns non 0 when done
         void Cancel();// * Stops the AutoTune
 
-        void SetOutputStep(double);// * how far above and below the starting value will the output step?
-        double GetOutputStep();
 
-        void SetControlType(int);// * Determies if the tuning parameters returned will be PI (D=0)
-        int GetControlType();//   or PID.  (0=PI, 1=PID)
 
         void SetLookbackSec(int);// * how far back are we looking to identify peaks
         int GetLookbackSec();
 
-        void SetNoiseBand(double);// * the autotune will ignore signal chatter smaller than this value
-        double GetNoiseBand();//   this should be acurately set
 
         double GetKp();// * once autotune is complete, these functions contain the
         double GetKi();//   computed tuning parameters.
@@ -108,6 +105,7 @@ namespace PIDAutotune {
 
             double highOutput; // Value which reaches target and high slope
             double lowOutput; // Value which results in <input> lower than target with respect to lowSlope
+            bool bangBangDone;
         };
 
         void FinishUp();
@@ -118,10 +116,6 @@ namespace PIDAutotune {
 
 
         bool isMax, isMin;
-        double *input, *output;
-        double setpoint;
-        double noiseBand;
-        int controlType;
         bool running;
         unsigned long peak1, peak2, lastTime;
         int sampleTime;
@@ -133,11 +127,12 @@ namespace PIDAutotune {
         bool justchanged;
         bool justevaled;
         double absMax, absMin;
-        double oStep;
         double outputStart;
         double Ku, Pu;
         static unsigned long millis();
         static unsigned long minutes();
+
+        bool bangBangToTarget(Autotune::TuningParameterSearchConfig &config);
 
     };
 }

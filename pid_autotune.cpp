@@ -1,200 +1,147 @@
 #include "pid_autotune.h"
 #include <chrono>
 #include <cstdlib>
+#include <stdio.h>
 
 using namespace PIDAutotune;
 
-Autotune::Autotune(double* Input, double* Output, double s_point)
-{
-    input = Input;
-    output = Output;
-    controlType = 1 ; //default to PI
-    noiseBand = 0.5;
+
+Autotune::Autotune(Autotune::TuningParameters &tuningParameters) {
+    this->parameters = &tuningParameters;
     running = false;
-    oStep = 30;
-    SetLookbackSec(10);
+    SetLookbackSec(parameters->loopbackSec);
     lastTime = Autotune::millis();
-    setpoint = s_point;
+    searchConfig = nullptr;
 }
 
-
-
-void Autotune::Cancel()
-{
+void Autotune::Cancel() {
     running = false;
 }
 
-int Autotune::Runtime()
-{
-    justevaled=false;
-    if(peakCount>9 && running)
-    {
+int Autotune::Runtime() {
+    justevaled = false;
+    if (peakCount > 9 && running) {
         running = false;
         FinishUp();
         return 1;
     }
     unsigned long now = Autotune::millis();
 
-    if((now-lastTime)<sampleTime) return false;
+    if ((now - lastTime) < sampleTime) return false;
     lastTime = now;
-    double refVal = *input;
-    justevaled=true;
-    if(!running)
-    { //initialize working variables the first time around
+    double refVal = *parameters->input;
+    justevaled = true;
+    if (!running) { //initialize working variables the first time around
         peakType = 0;
-        peakCount=0;
-        justchanged=false;
-        absMax=refVal;
-        absMin=refVal;
+        peakCount = 0;
+        justchanged = false;
+        absMax = refVal;
+        absMin = refVal;
         running = true;
-        outputStart = *output;
-        *output = outputStart+oStep;
-    }
-    else
-    {
-        if(refVal>absMax)absMax=refVal;
-        if(refVal<absMin)absMin=refVal;
+        outputStart = parameters->start;
+        *parameters->output = outputStart + parameters->step;
+    } else {
+        if (refVal > absMax)absMax = refVal;
+        if (refVal < absMin)absMin = refVal;
     }
 
     //oscillate the output base on the input's relation to the setpoint
 
-    if(refVal>setpoint+noiseBand) *output = outputStart-oStep;
-    else if (refVal<setpoint-noiseBand) *output = outputStart+oStep;
+    if (refVal > parameters->setpoint + parameters->noise) *parameters->output = outputStart - parameters->step;
+    else if (refVal < parameters->setpoint - parameters->noise) *parameters->output = outputStart + parameters->step;
 
 
     //bool isMax=true, isMin=true;
-    isMax=true;isMin=true;
+    isMax = true;
+    isMin = true;
     //id peaks
-    for(int i=nLookBack-1;i>=0;i--)
-    {
+    for (int i = nLookBack - 1; i >= 0; i--) {
         double val = lastInputs[i];
-        if(isMax) isMax = refVal>val;
-        if(isMin) isMin = refVal<val;
-        lastInputs[i+1] = lastInputs[i];
+        if (isMax) isMax = refVal > val;
+        if (isMin) isMin = refVal < val;
+        lastInputs[i + 1] = lastInputs[i];
     }
     lastInputs[0] = refVal;
-    if(nLookBack<9)
-    {  //we don't want to trust the maxes or mins until the inputs array has been filled
+    if (nLookBack < 9) {  //we don't want to trust the maxes or mins until the inputs array has been filled
         return 0;
     }
 
-    if(isMax)
-    {
-        if(peakType==0)peakType=1;
-        if(peakType==-1)
-        {
+    if (isMax) {
+        if (peakType == 0)peakType = 1;
+        if (peakType == -1) {
             peakType = 1;
-            justchanged=true;
+            justchanged = true;
             peak2 = peak1;
         }
         peak1 = now;
         peaks[peakCount] = refVal;
 
-    }
-    else if(isMin)
-    {
-        if(peakType==0)peakType=-1;
-        if(peakType==1)
-        {
-            peakType=-1;
+    } else if (isMin) {
+        if (peakType == 0)peakType = -1;
+        if (peakType == 1) {
+            peakType = -1;
             peakCount++;
-            justchanged=true;
+            justchanged = true;
         }
 
-        if(peakCount<10)peaks[peakCount] = refVal;
+        if (peakCount < 10)peaks[peakCount] = refVal;
     }
 
-    if(justchanged && peakCount>2)
-    { //we've transitioned.  check if we can autotune based on the last peaks
-        double avgSeparation = (abs(peaks[peakCount-1]-peaks[peakCount-2])+abs(peaks[peakCount-2]-peaks[peakCount-3]))/2;
-        if( avgSeparation < 0.05*(absMax-absMin))
-        {
+    if (justchanged && peakCount > 2) { //we've transitioned.  check if we can autotune based on the last peaks
+        double avgSeparation =
+                (abs(peaks[peakCount - 1] - peaks[peakCount - 2]) + abs(peaks[peakCount - 2] - peaks[peakCount - 3])) /
+                2;
+        if (avgSeparation < 0.05 * (absMax - absMin)) {
             FinishUp();
             running = false;
             return 1;
 
         }
     }
-    justchanged=false;
+    justchanged = false;
     return 0;
 }
-void Autotune::FinishUp()
-{
-    *output = outputStart;
+
+void Autotune::FinishUp() {
+    *parameters->output = outputStart;
     //we can generate tuning parameters!
-    Ku = 4*(2*oStep)/((absMax-absMin)*3.14159);
-    Pu = (double)(peak1-peak2) / 1000;
+    Ku = 4 * (2 * parameters->step) / ((absMax - absMin) * 3.14159);
+    Pu = (double) (peak1 - peak2) / 1000;
 }
 
-double Autotune::GetKp()
-{
-    return controlType==1 ? 0.6 * Ku : 0.4 * Ku;
+double Autotune::GetKp() {
+    return parameters->ctrlType == IncludeD ? 0.6 * Ku : 0.4 * Ku;
 }
 
-double Autotune::GetKi()
-{
-    return controlType==1? 1.2*Ku / Pu : 0.48 * Ku / Pu;  // Ki = Kc/Ti
+double Autotune::GetKi() {
+    return parameters->ctrlType == IncludeD ? 1.2 * Ku / Pu : 0.48 * Ku / Pu;  // Ki = Kc/Ti
 }
 
-double Autotune::GetKd()
-{
-    return controlType==1? 0.075 * Ku * Pu : 0;  //Kd = Kc * Td
+double Autotune::GetKd() {
+    return parameters->ctrlType == IncludeD ? 0.075 * Ku * Pu : 0;  //Kd = Kc * Td
 }
 
-void Autotune::SetOutputStep(double Step)
-{
-    oStep = Step;
-}
 
-double Autotune::GetOutputStep()
-{
-    return oStep;
-}
+void Autotune::SetLookbackSec(int value) {
+    if (value < 1) value = 1;
 
-void Autotune::SetControlType(int Type) //0=PI, 1=PID
-{
-    controlType = Type;
-}
-int Autotune::GetControlType()
-{
-    return controlType;
-}
-
-void Autotune::SetNoiseBand(double Band)
-{
-    noiseBand = Band;
-}
-
-double Autotune::GetNoiseBand()
-{
-    return noiseBand;
-}
-
-void Autotune::SetLookbackSec(int value)
-{
-    if (value<1) value = 1;
-
-    if(value<25)
-    {
+    if (value < 25) {
         nLookBack = value * 4;
         sampleTime = 250;
-    }
-    else
-    {
+    } else {
         nLookBack = 100;
-        sampleTime = value*10;
+        sampleTime = value * 10;
     }
 }
 
-int Autotune::GetLookbackSec()
-{
+int Autotune::GetLookbackSec() {
     return nLookBack * sampleTime / 1000;
 }
 
 unsigned long Autotune::millis() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now().time_since_epoch()
-            ).count();
+    ).count();
 }
 
 unsigned long Autotune::minutes() {
@@ -203,155 +150,190 @@ unsigned long Autotune::minutes() {
     ).count();
 }
 
-Autotune::Autotune(Autotune::TuningParameters &tuningParameters) {
-    this->parameters = &tuningParameters;
-}
 
 Autotune::ParameterSearchErrors Autotune::findTuningParameters(uint8_t timeoutInMinutes) {
-    this->searchConfig = new TuningParameterSearchConfig();
-    this->searchConfig->timeoutMin = timeoutInMinutes;
-    return findTuningParameters((TuningParameterSearchConfig &)this->searchConfig);
+    if (this->searchConfig == nullptr) {
+        this->searchConfig = new TuningParameterSearchConfig();
+        this->searchConfig->timeoutMin = timeoutInMinutes;
+    }
+    return findTuningParameters(*searchConfig);
 }
 
 Autotune::ParameterSearchErrors Autotune::findTuningParameters(Autotune::TuningParameterSearchConfig &config) {
 
     if (!searchData.initialized) {
+        printf("Initialized\n");
         // First time called, initialize data, thus a valid datapoint is present on next call
         searchData.start = minutes();
         searchData.lastCapture = millis();
-        searchData.lastPoint = *input;
+        searchData.lastPoint = *parameters->input;
         searchData.initialized = true;
         // Set the output to start value
-        *output = config.startOutput;
+        *parameters->output = config.startOutput;
         return Busy;
     }
 
     // Check if timeout exceeded
     auto isTimeout = (minutes() - searchData.start) >= config.timeoutMin;
     if (isTimeout) {
+        printf("TIMEOUT\n");
         // Timeout reached cleanup data and return the error
         searchData.clean();
         return Autotune::ParameterSearchErrors::Timeout;
     }
 
-    // Capture data
-    auto doCapture = (millis() - searchData.lastCapture) >= config.slopeLoopbackMilli;
-    if (!doCapture) return Busy; // wait
+    // if the target is way too far away we do baning !
+    if (!searchData.bangBangDone) {
+        bool bangRes = bangBangToTarget(config);
+        if (!bangRes)
+            return Busy;
+        searchData.bangBangDone = true;
+    }
+
+
 
     // Copy the current input, so it does not change within processing
-    double cInput = *input;
+    double cInput = *parameters->input;
     auto slope = cInput - searchData.lastPoint;
     bool isCooling = slope < 0;
     if (slope < 0) {
         // always work with positive slope, cause negative slope is indicated by <isCooling>
         slope *= -1;
     }
-    bool slopeOk = false;
+    bool slopeOk, doCapture;
     // Processing
     switch (searchData.mode) {
         case High:
             if (isCooling) {
-                // Cooling is exactly the what we dont want, thus increase and set mode to settle
-                auto newOutput = *output + searchConfig->increaseStep;
-                if (newOutput >= parameters->maxOutput) {
-                    // Still cooling and already exceeding maximum == Error
-                    // reset output and return error
-                    *output = 0;
-                    searchData.clean();
-                    return NotReachable;
-                }
-                *output = newOutput;
-                searchData.mode = Settle;
-                searchData.startSettle = millis();
-                searchData.lastMode = High;
-                break;
-            }
-
-            // Check if slope is within the limits, don't increase when target is not reached but slope is ok
-            // Might be a slow process but rather save
-            slopeOk = slope >= searchConfig->minSlopeUntilIncreaseStep;
-
-            if (!slopeOk) break;
-            // Check if target already reached, if so, than check slope overshoot
-            if (cInput >= parameters->setpoint) {
-                if (slope < searchConfig->minSlopeOvershoot) {
-                    auto newOutput = *output + searchConfig->increaseStep;
+                // Check if just noise
+                if (slope > searchConfig->coolingNoise) {
+                    // Cooling is exactly the what we dont want, thus increase and set mode to settle
+                    auto newOutput = *parameters->output + (searchConfig->increaseStep * 2);
                     if (newOutput >= parameters->maxOutput) {
                         // Still cooling and already exceeding maximum == Error
                         // reset output and return error
-                        *output = 0;
+                        *parameters->output = 0;
                         searchData.clean();
                         return NotReachable;
                     }
+                    printf("Cooling %.2f\n", *parameters->output);
+                    *parameters->output = newOutput;
+                    searchData.mode = Settle;
+                    searchData.startSettle = millis();
+                    searchData.lastMode = High;
+                    break;
+                }
+            }
+            // Capture data
+            doCapture = (millis() - searchData.lastCapture) >= config.slopeLoopbackMilli;
+            if (!doCapture) return Busy; // wait
+            printf("HIGH\n");
+            // Check if slope is within the limits, don't increase when target is not reached but slope is ok
+            // Might be a slow process but rather save
+            slopeOk = slope >= searchConfig->minSlopeUntilIncreaseStep;
+            printf("Slope ok %s\n", slopeOk ? "yes" : "no");
+
+            if (slopeOk && cInput < parameters->setpoint) break;
+            // Check if target already reached, if so, than check slope overshoot
+            if (cInput >= parameters->setpoint) {
+                if (slope < searchConfig->minSlopeOvershoot) {
+                    auto newOutput = *parameters->output + searchConfig->increaseStep;
+                    if (newOutput >= parameters->maxOutput) {
+                        // Still cooling and already exceeding maximum == Error
+                        // reset output and return error
+                        *parameters->output = 0;
+                        searchData.clean();
+                        printf("Not reachable\n");
+                        return NotReachable;
+                    }
+                    printf("Increase %.2f\n", *parameters->output);
+                    *parameters->output = newOutput;
                 } else {
-                    // reset output to start value, and switch mode, High mode done
-                    *output = config.startOutput;
+                    // switch mode, High mode done
+                    printf("High found %.2f\n", *parameters->output);
                     searchData.mode = Low;
-                    searchData.highOutput = *output;
+                    searchData.highOutput = *parameters->output;
                 }
             } else {
                 // Slope is below cfg, thus increase output and continue
-                auto newOutput = *output + searchConfig->increaseStep;
+                auto newOutput = *parameters->output + searchConfig->increaseStep;
                 if (newOutput >= parameters->maxOutput) {
                     // Still cooling and already exceeding maximum == Error
                     // reset output and return error
-                    *output = 0;
+                    *parameters->output = 0;
                     searchData.clean();
                     return NotReachable;
                 }
+                printf("Slope < cfg %.2f\t output %.2f\n", slope, *parameters->output);
+
+                *parameters->output = newOutput;
             }
             break;
         case Low:
             if (!isCooling) {
                 // Wrong direction
-                auto newOutput = *output - searchConfig->decreaseStep;
-                if (newOutput < 0) {
-                    // We cant do any better than 0 thus error!
-                    *output = 0;
-                    searchData.clean();
-                    return NotReachable;
+                if (slope > searchConfig->coolingNoise) {
+                    auto newOutput = *parameters->output - (searchConfig->increaseStep * 2);
+                    if (newOutput < 0) {
+                        // We cant do any better than 0 thus error!
+                        *parameters->output = 0;
+                        searchData.clean();
+                        return NotReachable;
+                    }
+                    *parameters->output = newOutput;
+                    searchData.mode = Settle;
+                    searchData.startSettle = millis();
+                    searchData.lastMode = Low;
+                    break;
                 }
-                *output = newOutput;
-                searchData.mode = Settle;
-                searchData.startSettle = millis();
-                searchData.lastMode = Low;
-                break;
             }
+
+            // Capture data
+            doCapture = (millis() - searchData.lastCapture) >= config.slopeLoopbackMilli;
+            if (!doCapture) return Busy; // wait
             // Check if slope is within the limits, don't decrease when not below target but slope is ok
             // Might be a slow process but rather save
             slopeOk = slope >= searchConfig->minSlopeUntilDecreaseStep;
-            if (!slopeOk) break;
+            if (slopeOk && cInput > parameters->setpoint) break;
 
             // Check if already below target, if so, than check slope
             if (cInput < parameters->setpoint) {
                 if (slope < searchConfig->minSlopeBelowTarget) {
-                    auto newOutput = *output - searchConfig->decreaseStep;
+                    auto newOutput = *parameters->output - searchConfig->decreaseStep;
                     if (newOutput < 0) {
                         // We cant do any better than 0 thus error!
-                        *output = 0;
+                        *parameters->output = 0;
                         searchData.clean();
                         return NotReachable;
                     }
+                    *parameters->output = newOutput;
                 } else {
                     // Low found reset output, set result and signal we are done
-                    searchData.lowOutput = *output;
-                    *output = 0;
+                    searchData.lowOutput = *parameters->output;
+                    // Calculate step and start
+                    printf("Low: %.2f <-> High %.2f\n", searchData.lowOutput, searchData.highOutput);
+                    parameters->start = (searchData.lowOutput + searchData.highOutput) / 2;
+                    parameters->step = (double) searchData.highOutput - parameters->start;
+                    printf("Calculated values start: %.2f step: %.2f\n", parameters->start, parameters->step);
+                    *parameters->output = 0;
                     return Done;
                 }
             } else {
                 // Slope is below cfg, thus increase output and continue
-                auto newOutput = *output - searchConfig->decreaseStep;
+                auto newOutput = *parameters->output - searchConfig->decreaseStep;
                 if (newOutput < 0) {
                     // We cant do any better than 0 thus error!
-                    *output = 0;
+                    *parameters->output = 0;
                     searchData.clean();
                     return NotReachable;
                 }
+                *parameters->output = newOutput;
             }
 
             break;
         case Settle:
-            bool settleTimeout = ((double)(millis() - searchData.startSettle) / 1000) >= searchConfig->settleTimeoutSec;
+            bool settleTimeout =
+                    ((double) (millis() - searchData.startSettle) / 1000) >= searchConfig->settleTimeoutSec;
             if (settleTimeout) searchData.mode = searchData.lastMode; // Reset mode
             break;
     }
@@ -361,39 +343,57 @@ Autotune::ParameterSearchErrors Autotune::findTuningParameters(Autotune::TuningP
     return Busy;
 }
 
+bool Autotune::bangBangToTarget(Autotune::TuningParameterSearchConfig &config) {
 
-Autotune::TuningParameters::TuningParameters(): start(1),
-                                                step(0),
-                                                noise(1),
-                                                setpoint(0),
-                                                ctrlType(NoneD),
-                                                loopbackSec(20),
-                                                maxOutput(100)
-                                                {}
+    if (*parameters->input >= parameters->setpoint)
+        return true;
 
-Autotune::TuningParameterSearchConfig::TuningParameterSearchConfig():  increaseStep(5),
-                                                                       minSlopeOvershoot(0.5),
-                                                                       minSlopeUntilIncreaseStep(0.5),
-                                                                       decreaseStep(5),
-                                                                       minSlopeBelowTarget(0.2),
-                                                                       minSlopeUntilDecreaseStep(0.2),
-                                                                       slopeLoopbackMilli(2000),
-                                                                       timeoutMin(10),
-                                                                       settleTimeoutSec(5),
-                                                                       startOutput(5)
-{
+    auto diff = parameters->setpoint - *parameters->input;
+
+    if (*parameters->input >= (parameters->setpoint - config.maxBangBangDeviation)) {
+        *parameters->output = config.startOutput;
+        return true;
+    } else {
+        *parameters->output = parameters->maxOutput;
+    }
+    return false;
 }
 
-Autotune::ParameterSearchData::ParameterSearchData():   initialized(false),
-                                                        lastPoint(0),
-                                                        start(0),
-                                                        mode(High),
-                                                        lastCapture(0),
-                                                        lowOutput(0),
-                                                        highOutput(0),
-                                                        lastMode(High),
-                                                        startSettle(0)
-{
+
+Autotune::TuningParameters::TuningParameters() : start(1),
+                                                 step(0),
+                                                 noise(1),
+                                                 setpoint(0),
+                                                 ctrlType(NoneD),
+                                                 loopbackSec(20),
+                                                 maxOutput(100),
+                                                 input(nullptr),
+                                                 output(nullptr) {}
+
+Autotune::TuningParameterSearchConfig::TuningParameterSearchConfig() : increaseStep(0.5),
+                                                                       minSlopeOvershoot(0.2),
+                                                                       minSlopeUntilIncreaseStep(0.1),
+                                                                       decreaseStep(0.5),
+                                                                       minSlopeBelowTarget(0.05),
+                                                                       minSlopeUntilDecreaseStep(0.05),
+                                                                       slopeLoopbackMilli(5000),
+                                                                       timeoutMin(60),
+                                                                       settleTimeoutSec(2),
+                                                                       startOutput(15),
+                                                                       maxBangBangDeviation(3),
+                                                                       coolingNoise(0.05) {
+}
+
+Autotune::ParameterSearchData::ParameterSearchData() : initialized(false),
+                                                       lastPoint(0),
+                                                       start(0),
+                                                       mode(High),
+                                                       lastCapture(0),
+                                                       lowOutput(0),
+                                                       highOutput(0),
+                                                       lastMode(High),
+                                                       startSettle(0),
+                                                       bangBangDone(false) {
 }
 
 void Autotune::ParameterSearchData::clean() {
@@ -401,5 +401,6 @@ void Autotune::ParameterSearchData::clean() {
     lastPoint = 0;
     start = 0;
     lastCapture = 0;
+    bangBangDone = false;
     mode = High;
 }
