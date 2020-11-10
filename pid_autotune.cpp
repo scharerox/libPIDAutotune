@@ -162,7 +162,6 @@ Autotune::ParameterSearchErrors Autotune::findTuningParameters(uint8_t timeoutIn
 Autotune::ParameterSearchErrors Autotune::findTuningParameters(Autotune::TuningParameterSearchConfig &config) {
 
     if (!searchData.initialized) {
-        printf("Initialized\n");
         // First time called, initialize data, thus a valid datapoint is present on next call
         searchData.start = minutes();
         searchData.lastCapture = millis();
@@ -176,7 +175,6 @@ Autotune::ParameterSearchErrors Autotune::findTuningParameters(Autotune::TuningP
     // Check if timeout exceeded
     auto isTimeout = (minutes() - searchData.start) >= config.timeoutMin;
     if (isTimeout) {
-        printf("TIMEOUT\n");
         // Timeout reached cleanup data and return the error
         searchData.clean();
         return Autotune::ParameterSearchErrors::Timeout;
@@ -216,7 +214,6 @@ Autotune::ParameterSearchErrors Autotune::findTuningParameters(Autotune::TuningP
                         searchData.clean();
                         return NotReachable;
                     }
-                    printf("Cooling %.2f\n", *parameters->output);
                     *parameters->output = newOutput;
                     searchData.mode = Settle;
                     searchData.startSettle = millis();
@@ -227,11 +224,9 @@ Autotune::ParameterSearchErrors Autotune::findTuningParameters(Autotune::TuningP
             // Capture data
             doCapture = (millis() - searchData.lastCapture) >= config.slopeLoopbackMilli;
             if (!doCapture) return Busy; // wait
-            printf("HIGH\n");
             // Check if slope is within the limits, don't increase when target is not reached but slope is ok
             // Might be a slow process but rather save
             slopeOk = slope >= searchConfig->minSlopeUntilIncreaseStep;
-            printf("Slope ok %s\n", slopeOk ? "yes" : "no");
 
             if (slopeOk && cInput < parameters->setpoint) break;
             // Check if target already reached, if so, than check slope overshoot
@@ -243,14 +238,11 @@ Autotune::ParameterSearchErrors Autotune::findTuningParameters(Autotune::TuningP
                         // reset output and return error
                         *parameters->output = 0;
                         searchData.clean();
-                        printf("Not reachable\n");
                         return NotReachable;
                     }
-                    printf("Increase %.2f\n", *parameters->output);
                     *parameters->output = newOutput;
                 } else {
                     // switch mode, High mode done
-                    printf("High found %.2f\n", *parameters->output);
                     searchData.mode = Low;
                     searchData.highOutput = *parameters->output;
                 }
@@ -264,7 +256,6 @@ Autotune::ParameterSearchErrors Autotune::findTuningParameters(Autotune::TuningP
                     searchData.clean();
                     return NotReachable;
                 }
-                printf("Slope < cfg %.2f\t output %.2f\n", slope, *parameters->output);
 
                 *parameters->output = newOutput;
             }
@@ -311,10 +302,8 @@ Autotune::ParameterSearchErrors Autotune::findTuningParameters(Autotune::TuningP
                     // Low found reset output, set result and signal we are done
                     searchData.lowOutput = *parameters->output;
                     // Calculate step and start
-                    printf("Low: %.2f <-> High %.2f\n", searchData.lowOutput, searchData.highOutput);
                     parameters->start = (searchData.lowOutput + searchData.highOutput) / 2;
                     parameters->step = (double) searchData.highOutput - parameters->start;
-                    printf("Calculated values start: %.2f step: %.2f\n", parameters->start, parameters->step);
                     *parameters->output = 0;
                     return Done;
                 }
