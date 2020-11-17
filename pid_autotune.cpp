@@ -183,8 +183,9 @@ Autotune::ParameterSearchErrors Autotune::findTuningParameters(Autotune::TuningP
     // if the target is way too far away we do baning !
     if (!searchData.bangBangDone) {
         bool bangRes = bangBangToTarget(config);
-        if (!bangRes)
+        if (!bangRes) {
             return Busy;
+        }
         searchData.bangBangDone = true;
     }
 
@@ -206,7 +207,7 @@ Autotune::ParameterSearchErrors Autotune::findTuningParameters(Autotune::TuningP
                 // Check if just noise
                 if (slope > searchConfig->coolingNoise) {
                     // Cooling is exactly the what we dont want, thus increase and set mode to settle
-                    auto newOutput = *parameters->output + (searchConfig->increaseStep * 2);
+                    auto newOutput = *parameters->output + (searchConfig->increaseStep * 4);
                     if (newOutput >= parameters->maxOutput) {
                         // Still cooling and already exceeding maximum == Error
                         // reset output and return error
@@ -264,7 +265,7 @@ Autotune::ParameterSearchErrors Autotune::findTuningParameters(Autotune::TuningP
             if (!isCooling) {
                 // Wrong direction
                 if (slope > searchConfig->coolingNoise) {
-                    auto newOutput = *parameters->output - (searchConfig->increaseStep * 2);
+                    auto newOutput = *parameters->output - (searchConfig->increaseStep * 4);
                     if (newOutput < 0) {
                         // We cant do any better than 0 thus error!
                         *parameters->output = 0;
@@ -305,6 +306,8 @@ Autotune::ParameterSearchErrors Autotune::findTuningParameters(Autotune::TuningP
                     parameters->start = (searchData.lowOutput + searchData.highOutput) / 2;
                     parameters->step = (double) searchData.highOutput - parameters->start;
                     *parameters->output = 0;
+                    printf("Start %.2f step: %.2f\n", parameters->start, parameters->step);
+
                     return Done;
                 }
             } else {
@@ -359,16 +362,16 @@ Autotune::TuningParameters::TuningParameters() : start(1),
                                                  input(nullptr),
                                                  output(nullptr) {}
 
-Autotune::TuningParameterSearchConfig::TuningParameterSearchConfig() : increaseStep(0.5),
+Autotune::TuningParameterSearchConfig::TuningParameterSearchConfig() : increaseStep(0.8),
                                                                        minSlopeOvershoot(0.2),
-                                                                       minSlopeUntilIncreaseStep(0.1),
-                                                                       decreaseStep(0.5),
+                                                                       minSlopeUntilIncreaseStep(0.2),
+                                                                       decreaseStep(0.8),
                                                                        minSlopeBelowTarget(0.05),
                                                                        minSlopeUntilDecreaseStep(0.05),
-                                                                       slopeLoopbackMilli(5000),
+                                                                       slopeLoopbackMilli(4000),
                                                                        timeoutMin(60),
                                                                        settleTimeoutSec(2),
-                                                                       startOutput(15),
+                                                                       startOutput(5),
                                                                        maxBangBangDeviation(3),
                                                                        coolingNoise(0.05) {
 }
